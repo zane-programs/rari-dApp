@@ -1,6 +1,7 @@
 import {
   useContext,
   useEffect,
+  useMemo,
   useState,
   createContext,
   MouseEventHandler,
@@ -33,8 +34,11 @@ import { Column } from "utils/chakraUtils";
 // Hooks
 import { TokenData, useTokenData } from "hooks/useTokenData";
 // Aave
-import useReserveData from "hooks/interestRates/aave/useReserveData";
-import useReservesList from "hooks/interestRates/aave/useReservesList";
+// import useReserveData from "hooks/interestRates/aave/useReserveData";
+// import useReservesList from "hooks/interestRates/aave/useReservesList";
+import useReserves, {
+  AaveMarketInfo,
+} from "hooks/interestRates/aave/useReserves";
 // Compound
 // import useAllMarkets from "hooks/interestRates/compound/useAllMarkets";
 // import useCToken from "hooks/interestRates/compound/useCToken";
@@ -47,9 +51,18 @@ enum InterestRatesTableOptions {
   Borrowing = "borrowing",
 }
 
-const InterestRatesContext = createContext<InterestRatesTableOptions>(
-  InterestRatesTableOptions.Lending
-);
+type InterestRatesContext = {
+  selectedTable: InterestRatesTableOptions;
+  markets: {
+    aave: AaveMarketInfo[];
+  };
+};
+const InterestRatesContext = createContext<InterestRatesContext>({
+  selectedTable: InterestRatesTableOptions.Lending,
+  markets: {
+    aave: [],
+  },
+});
 
 export default function InterestRatesView() {
   // name of table in view (current)
@@ -58,10 +71,12 @@ export default function InterestRatesView() {
   );
 
   // Aave
-  const reservesList = useReservesList();
+  const aaveReserves = useReserves();
 
   return (
-    <InterestRatesContext.Provider value={tableName}>
+    <InterestRatesContext.Provider
+      value={{ selectedTable: tableName, markets: { aave: aaveReserves } }}
+    >
       <Column
         width="100%"
         mainAxisAlignment="center"
@@ -73,7 +88,7 @@ export default function InterestRatesView() {
         <Heading size="lg" mb="5">
           Interest Rates
         </Heading>
-        {reservesList.length === 0 ? (
+        {aaveReserves.length === 0 ? (
           <Center w="100%" h="100px">
             <Spinner size="xl" />
           </Center>
@@ -116,7 +131,7 @@ export default function InterestRatesView() {
                 </Tr>
               </Thead>
               <Tbody>
-                {reservesList.map((tokenAddress) => (
+                {aaveReserves.map(({ tokenAddress }) => (
                   <InterestRatesRow
                     assetAddress={tokenAddress}
                     key={tokenAddress}
@@ -186,8 +201,14 @@ function MultiPickerButton({
 }
 
 function InterestRatesRow({ assetAddress }: { assetAddress: string }) {
-  const aave = useReserveData(assetAddress);
   const asset = useTokenData(assetAddress);
+  const { markets } = useContext(InterestRatesContext);
+
+  // market data from Aave
+  const aave = useMemo(
+    () => markets.aave.find((reserve) => reserve.tokenAddress === assetAddress),
+    []
+  );
 
   return (
     <Tr initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -201,8 +222,8 @@ function InterestRatesRow({ assetAddress }: { assetAddress: string }) {
       {/* Aave */}
       <Td textAlign="center">
         <AnimatedPercentage
-          lendingRate={aave.lendingRate}
-          borrowingRate={aave.borrowingRate}
+          lendingRate={aave?.rates.lending}
+          borrowingRate={aave?.rates.borrowing}
         />
       </Td>
       {/* Fuse P1 */}
@@ -221,12 +242,12 @@ function AnimatedPercentage({
   lendingRate,
   borrowingRate,
 }: {
-  lendingRate: BigNumber | null;
-  borrowingRate: BigNumber | null;
+  lendingRate: BigNumber | null | undefined;
+  borrowingRate: BigNumber | null | undefined;
 }) {
-  const selectedTable = useContext(InterestRatesContext);
+  const { selectedTable } = useContext(InterestRatesContext);
 
-  return lendingRate === null || borrowingRate === null ? (
+  return !lendingRate || !borrowingRate ? (
     // show Spinner if values not yet loaded
     <Spinner size="xs" />
   ) : (
