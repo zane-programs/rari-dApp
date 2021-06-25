@@ -9,23 +9,38 @@ import {
 
 // Components
 import {
-  Heading,
+  Box,
   Button,
   ButtonGroup,
+  Center,
+  Flex,
+  Heading,
+  Image,
+  Spacer,
+  Spinner,
   Table,
-  Thead,
   Tbody,
-  Tr,
-  Th,
+  Thead,
   Td,
+  Th,
+  Tr,
 } from "@chakra-ui/react";
+import { Input, InputGroup, InputLeftElement } from "@chakra-ui/input";
+import { SearchIcon } from "@chakra-ui/icons";
 import { motion } from "framer-motion";
 import { Column } from "utils/chakraUtils";
 
-type Asset = {
-  name: string;
-  symbol: string;
-};
+// Hooks
+import { TokenData, useTokenData } from "hooks/useTokenData";
+// Aave
+import useReserveData from "hooks/interestRates/aave/useReserveData";
+import useReservesList from "hooks/interestRates/aave/useReservesList";
+// Compound
+// import useAllMarkets from "hooks/interestRates/compound/useAllMarkets";
+// import useCToken from "hooks/interestRates/compound/useCToken";
+
+// Utils
+import BigNumber from "bignumber.js";
 
 enum InterestRatesTableOptions {
   Lending = "lending",
@@ -42,7 +57,8 @@ export default function InterestRatesView() {
     InterestRatesTableOptions.Lending
   );
 
-  // const { address, rari } = useRari();
+  // Aave
+  const reservesList = useReservesList();
 
   return (
     <InterestRatesContext.Provider value={tableName}>
@@ -57,38 +73,59 @@ export default function InterestRatesView() {
         <Heading size="lg" mb="5">
           Interest Rates
         </Heading>
-        <MultiPicker
-          options={{
-            lending: "Lending Rates",
-            borrowing: "Borrowing Rates",
-          }}
-          // set table on change
-          onChange={(value) => setTableName(value as InterestRatesTableOptions)}
-        />
-        <Table mt="4">
-          <Thead color="white">
-            <Tr>
-              <Th color="white">Asset</Th>
-              <Th color="white" textAlign="center" fontWeight="bold">
-                Compound
-              </Th>
-              <Th color="white" textAlign="center" fontWeight="bold">
-                Aave
-              </Th>
-              <Th color="white" textAlign="center" fontWeight="bold">
-                Fuse P1
-              </Th>
-              <Th color="white" textAlign="center" fontWeight="bold">
-                Fuse P2
-              </Th>
-            </Tr>
-          </Thead>
-          <Tbody>
-            <InterestRatesRow asset={{ name: "Bancor", symbol: "BNT" }} />
-            <InterestRatesRow asset={{ name: "Dai", symbol: "DAI" }} />
-            <InterestRatesRow asset={{ name: "ZeroEx", symbol: "ZRX" }} />
-          </Tbody>
-        </Table>
+        {reservesList.length === 0 ? (
+          <Center w="100%" h="100px">
+            <Spinner size="xl" />
+          </Center>
+        ) : (
+          <>
+            <Flex w="100%">
+              <Box flex="1">
+                <MultiPicker
+                  options={{
+                    lending: "Lending Rates",
+                    borrowing: "Borrowing Rates",
+                  }}
+                  // set table on change
+                  onChange={(value) =>
+                    setTableName(value as InterestRatesTableOptions)
+                  }
+                />
+              </Box>
+              <Spacer flex="2" />
+              <Box flex="1">
+                <TokenSearch />
+              </Box>
+            </Flex>
+            <Table mt="4">
+              <Thead color="white">
+                <Tr>
+                  <Th color="white">Asset</Th>
+                  <Th color="white" textAlign="center" fontWeight="bold">
+                    Compound
+                  </Th>
+                  <Th color="white" textAlign="center" fontWeight="bold">
+                    Aave
+                  </Th>
+                  <Th color="white" textAlign="center" fontWeight="bold">
+                    Fuse P1
+                  </Th>
+                  <Th color="white" textAlign="center" fontWeight="bold">
+                    Fuse P2
+                  </Th>
+                </Tr>
+              </Thead>
+              <Tbody>
+                {reservesList.map((tokenAddress) => (
+                  <InterestRatesRow
+                    assetAddress={tokenAddress}
+                    key={tokenAddress}
+                  />
+                ))}
+              </Tbody>
+            </Table>
+          </>
+        )}
       </Column>
     </InterestRatesContext.Provider>
   );
@@ -148,29 +185,35 @@ function MultiPickerButton({
   );
 }
 
-function InterestRatesRow({ asset }: { asset: Asset }) {
+function InterestRatesRow({ assetAddress }: { assetAddress: string }) {
+  const aave = useReserveData(assetAddress);
+  const asset = useTokenData(assetAddress);
+
   return (
-    <MotionTr
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-    >
+    <Tr initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <Td fontWeight="bold">
-        {asset.name} ({asset.symbol})
+        <AssetTitle asset={asset} />
       </Td>
+      {/* Compound */}
       <Td textAlign="center">
-        <AnimatedPercentage lendingRate={0.0342} borrowingRate={0.0666} />
+        <AnimatedPercentage lendingRate={null} borrowingRate={null} />
       </Td>
+      {/* Aave */}
       <Td textAlign="center">
-        <AnimatedPercentage lendingRate={0.0342} borrowingRate={0.0666} />
+        <AnimatedPercentage
+          lendingRate={aave.lendingRate}
+          borrowingRate={aave.borrowingRate}
+        />
       </Td>
+      {/* Fuse P1 */}
       <Td textAlign="center">
-        <AnimatedPercentage lendingRate={0.0342} borrowingRate={0.0666} />
+        <AnimatedPercentage lendingRate={null} borrowingRate={null} />
       </Td>
+      {/* Fuse P2 */}
       <Td textAlign="center">
-        <AnimatedPercentage lendingRate={0.0342} borrowingRate={0.0666} />
+        <AnimatedPercentage lendingRate={null} borrowingRate={null} />
       </Td>
-    </MotionTr>
+    </Tr>
   );
 }
 
@@ -178,12 +221,15 @@ function AnimatedPercentage({
   lendingRate,
   borrowingRate,
 }: {
-  lendingRate: number;
-  borrowingRate: number;
+  lendingRate: BigNumber | null;
+  borrowingRate: BigNumber | null;
 }) {
   const selectedTable = useContext(InterestRatesContext);
 
-  return (
+  return lendingRate === null || borrowingRate === null ? (
+    // show Spinner if values not yet loaded
+    <Spinner size="xs" />
+  ) : (
     <motion.div
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
@@ -193,7 +239,7 @@ function AnimatedPercentage({
       // had to add key prop for framer-motion to animate
       key={selectedTable}
     >
-      {formatPercentage(
+      {formatPercentageBN(
         selectedTable === InterestRatesTableOptions.Lending
           ? lendingRate
           : borrowingRate
@@ -202,11 +248,55 @@ function AnimatedPercentage({
   );
 }
 
-// format percentage using user locale
-const formatPercentage = (rate: number) =>
-  (rate * 100).toLocaleString(undefined, {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }) + "%";
+function AssetTitle({ asset }: { asset?: TokenData }) {
+  const [hasLogoLoaded, setHasLogoLoaded] = useState(false);
 
-const MotionTr = motion(Tr);
+  return asset ? (
+    // show asset title Name (Symbol)
+    <>
+      <Spinner size="xs" hidden={hasLogoLoaded} />
+      <Box hidden={!hasLogoLoaded}>
+        <Image
+          src={asset?.logoURL}
+          borderRadius="full"
+          boxSize="18px"
+          display="inline-block"
+          mr="6px"
+          // shift icons up 1px (looked awkward otherwise)
+          position="relative"
+          transform="translateY(-1px)"
+          onLoad={() => setHasLogoLoaded(true)}
+        />
+        {asset?.name} ({asset?.symbol})
+      </Box>
+    </>
+  ) : (
+    // no data yet, so show spinner
+    <Spinner size="xs" />
+  );
+}
+
+function TokenSearch(props: any) {
+  const [val, setVal] = useState("");
+  return (
+    <Box {...props}>
+      <InputGroup>
+        <InputLeftElement
+          pointerEvents="none"
+          children={<SearchIcon color="#757575" />}
+        />
+        <Input
+          variant="filled"
+          value={val}
+          onChange={({ target: { value } }) => setVal(value)}
+          placeholder="Search Assets"
+          _placeholder={{ color: "gray.500", fontWeight: "bold" }}
+        />
+      </InputGroup>
+    </Box>
+  );
+}
+
+// format percentage with 2 decimal places
+const formatPercentageBN = (rate: BigNumber) =>
+  rate.times(100).toFixed(2) + "%";

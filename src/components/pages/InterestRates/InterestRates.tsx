@@ -2,7 +2,7 @@
 import { Column } from "utils/chakraUtils";
 import InterestRatesView from "./InterestRatesView";
 
-// hooks
+// Hooks
 import { useIsSmallScreen } from "hooks/useIsSmallScreen";
 
 export default function InterestRates() {
