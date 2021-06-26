@@ -32,19 +32,18 @@ import { motion } from "framer-motion";
 import { Column } from "utils/chakraUtils";
 
 // Hooks
-import { TokenData, useTokenData } from "hooks/useTokenData";
+import { TokenData, fetchTokenData } from "hooks/useTokenData";
 // Aave
-// import useReserveData from "hooks/interestRates/aave/useReserveData";
-// import useReservesList from "hooks/interestRates/aave/useReservesList";
-import useReserves, {
-  AaveMarketInfo,
-} from "hooks/interestRates/aave/useReserves";
+import useReserves from "hooks/interestRates/aave/useReserves";
 // Compound
-// import useAllMarkets from "hooks/interestRates/compound/useAllMarkets";
+import useCompoundMarkets from "hooks/interestRates/compound/useCompoundMarkets";
 // import useCToken from "hooks/interestRates/compound/useCToken";
 
 // Utils
 import BigNumber from "bignumber.js";
+
+// Types
+import { MarketInfo } from "hooks/interestRates/types";
 
 enum InterestRatesTableOptions {
   Lending = "lending",
@@ -53,15 +52,21 @@ enum InterestRatesTableOptions {
 
 type InterestRatesContext = {
   selectedTable: InterestRatesTableOptions;
+  tokens: TokenData[];
   markets: {
-    aave: AaveMarketInfo[];
+    aave: MarketInfo[];
+    compound: MarketInfo[];
   };
+  marketDataLoaded: boolean; // whether or not the market data has loaded
 };
 const InterestRatesContext = createContext<InterestRatesContext>({
   selectedTable: InterestRatesTableOptions.Lending,
+  tokens: [],
   markets: {
     aave: [],
+    compound: [],
   },
+  marketDataLoaded: false,
 });
 
 export default function InterestRatesView() {
@@ -69,13 +74,74 @@ export default function InterestRatesView() {
   const [tableName, setTableName] = useState<InterestRatesTableOptions>(
     InterestRatesTableOptions.Lending
   );
+  // search term in TokenSearch component
+  const [tokenSearchValue, setTokenSearchValue] = useState("");
+  // information about each token
+  const [tokenData, setTokenData] = useState<TokenData[]>([]);
 
   // Aave
   const aaveReserves = useReserves();
+  // Compound
+  const compoundMarkets = useCompoundMarkets();
+
+  useEffect(() => {
+    async function getTokenData() {
+      // gather list of all tokens, using Set to get a unique list
+      // (added downlevelIteration as true to tsconfig.json to support
+      // spread operator for Set)
+      const tokenAddresses = [
+        ...new Set([
+          ...aaveReserves.map((reserve) => reserve.tokenAddress),
+          ...compoundMarkets.map((market) => market.tokenAddress),
+        ]),
+      ];
+
+      // fetch token data asynchronously
+      const tokenDataList: TokenData[] = [];
+      await Promise.all(
+        tokenAddresses.map(async (address) => {
+          tokenDataList.push(await fetchTokenData(address));
+        })
+      );
+
+      // sort token data according to order in tokenAddresses
+      tokenDataList.sort(
+        (a, b) =>
+          tokenAddresses.indexOf(a.address) - tokenAddresses.indexOf(b.address)
+      );
+
+      // set list in state
+      setTokenData(tokenDataList);
+    }
+
+    getTokenData();
+  }, [aaveReserves]);
+
+  // token list filtered by search term
+  const filteredTokenData = useMemo(
+    () =>
+      tokenSearchValue === ""
+        ? tokenData
+        : tokenData.filter(
+            (token) =>
+              token.name
+                .toLowerCase()
+                .startsWith(tokenSearchValue.toLowerCase()) ||
+              token.symbol
+                .toLowerCase()
+                .startsWith(tokenSearchValue.toLowerCase())
+          ),
+    [tokenSearchValue, tokenData]
+  );
 
   return (
     <InterestRatesContext.Provider
-      value={{ selectedTable: tableName, markets: { aave: aaveReserves } }}
+      value={{
+        selectedTable: tableName,
+        tokens: filteredTokenData,
+        markets: { aave: aaveReserves, compound: compoundMarkets },
+        marketDataLoaded: aaveReserves.length > 0 && compoundMarkets.length > 0,
+      }}
     >
       <Column
         width="100%"
@@ -109,7 +175,7 @@ export default function InterestRatesView() {
               </Box>
               <Spacer flex="2" />
               <Box flex="1">
-                <TokenSearch />
+                <TokenSearch onChange={setTokenSearchValue} />
               </Box>
             </Flex>
             <Table mt="4">
@@ -131,11 +197,8 @@ export default function InterestRatesView() {
                 </Tr>
               </Thead>
               <Tbody>
-                {aaveReserves.map(({ tokenAddress }) => (
-                  <InterestRatesRow
-                    assetAddress={tokenAddress}
-                    key={tokenAddress}
-                  />
+                {filteredTokenData.map(({ address }) => (
+                  <InterestRatesRow assetAddress={address} key={address} />
                 ))}
               </Tbody>
             </Table>
@@ -201,13 +264,25 @@ function MultiPickerButton({
 }
 
 function InterestRatesRow({ assetAddress }: { assetAddress: string }) {
-  const asset = useTokenData(assetAddress);
-  const { markets } = useContext(InterestRatesContext);
+  const { markets, tokens } = useContext(InterestRatesContext);
+
+  // information about this particular token or asset
+  const asset = useMemo(
+    () => tokens?.find((token) => token.address === assetAddress),
+    [tokens]
+  );
 
   // market data from Aave
   const aave = useMemo(
     () => markets.aave.find((reserve) => reserve.tokenAddress === assetAddress),
-    []
+    [markets.aave]
+  );
+
+  // market data from Aave
+  const compound = useMemo(
+    () =>
+      markets.compound.find((market) => market.tokenAddress === assetAddress),
+    [markets.compound]
   );
 
   return (
@@ -217,7 +292,10 @@ function InterestRatesRow({ assetAddress }: { assetAddress: string }) {
       </Td>
       {/* Compound */}
       <Td textAlign="center">
-        <AnimatedPercentage lendingRate={null} borrowingRate={null} />
+        <AnimatedPercentage
+          lendingRate={compound?.rates.lending}
+          borrowingRate={compound?.rates.borrowing}
+        />
       </Td>
       {/* Aave */}
       <Td textAlign="center">
@@ -242,14 +320,15 @@ function AnimatedPercentage({
   lendingRate,
   borrowingRate,
 }: {
+  // undefined = loading, null = not present
   lendingRate: BigNumber | null | undefined;
   borrowingRate: BigNumber | null | undefined;
 }) {
-  const { selectedTable } = useContext(InterestRatesContext);
+  const { selectedTable, marketDataLoaded } = useContext(InterestRatesContext);
 
   return !lendingRate || !borrowingRate ? (
-    // show Spinner if values not yet loaded
-    <Spinner size="xs" />
+    // show Spinner if values not yet loaded, otherwise show dash
+    <>{marketDataLoaded ? "\u2013" : <Spinner size="xs" />}</>
   ) : (
     <motion.div
       initial={{ opacity: 0, y: -10 }}
@@ -297,10 +376,16 @@ function AssetTitle({ asset }: { asset?: TokenData }) {
   );
 }
 
-function TokenSearch(props: any) {
+function TokenSearch({ onChange }: { onChange: (value: string) => void }) {
   const [val, setVal] = useState("");
+
+  // run onChange on value change
+  useEffect(() => {
+    onChange(val);
+  }, [val, onChange]);
+
   return (
-    <Box {...props}>
+    <Box>
       <InputGroup>
         <InputLeftElement
           pointerEvents="none"

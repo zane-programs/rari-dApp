@@ -10,21 +10,14 @@ import LendingPool from "./LendingPool";
 import BigNumber from "bignumber.js";
 import Web3 from "web3";
 
-type InterestRatesType = {
-  lending: BigNumber;
-  borrowing: BigNumber;
-};
-
-export type AaveMarketInfo = {
-  tokenAddress: string;
-  rates: InterestRatesType;
-};
+// Types
+import { MarketInfo, InterestRatesType } from "../types";
 
 export default function useReserves() {
   const { rari } = useRari();
 
   // state for reserves (list & borrowing/lending rate data)
-  const [reserves, setReserves] = useState<AaveMarketInfo[]>([]);
+  const [reserves, setReserves] = useState<MarketInfo[]>([]);
 
   // ref for refresh interval
   const refreshInterval = useRef<number | null>(null);
@@ -43,7 +36,7 @@ export default function useReserves() {
         .call();
 
       // grab reserve data asynchronously
-      const reservesData: AaveMarketInfo[] = [];
+      const reservesData: MarketInfo[] = [];
       await Promise.all(
         tokenList.map(async (address) => {
           reservesData.push({
@@ -54,6 +47,9 @@ export default function useReserves() {
       );
 
       // sort reserves according to tokenList order
+      // TODO: possibly remove this, as it may no
+      // longer be necessary if the sorting happens
+      // in InterestRatesView
       reservesData.sort(
         (a, b) =>
           tokenList.indexOf(a.tokenAddress) - tokenList.indexOf(b.tokenAddress)
