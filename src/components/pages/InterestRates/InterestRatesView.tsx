@@ -1,22 +1,11 @@
-import {
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  createContext,
-  MouseEventHandler,
-  ReactNode,
-} from "react";
+import { useEffect, useMemo, useState, createContext } from "react";
 
 // Components
 import {
   Box,
-  Button,
-  ButtonGroup,
   Center,
   Flex,
   Heading,
-  Image,
   Spacer,
   Spinner,
   Table,
@@ -26,10 +15,10 @@ import {
   Th,
   Tr,
 } from "@chakra-ui/react";
-import { Input, InputGroup, InputLeftElement } from "@chakra-ui/input";
-import { SearchIcon } from "@chakra-ui/icons";
-import { motion } from "framer-motion";
 import { Column } from "utils/chakraUtils";
+import InterestRatesRow from "./InterestRatesRow";
+import MultiPicker from "./MultiPicker";
+import TokenSearch from "./TokenSearch";
 
 // Hooks
 import { TokenData, fetchTokenData } from "hooks/useTokenData";
@@ -37,15 +26,11 @@ import { TokenData, fetchTokenData } from "hooks/useTokenData";
 import useReserves from "hooks/interestRates/aave/useReserves";
 // Compound
 import useCompoundMarkets from "hooks/interestRates/compound/useCompoundMarkets";
-// import useCToken from "hooks/interestRates/compound/useCToken";
-
-// Utils
-import BigNumber from "bignumber.js";
 
 // Types
 import { MarketInfo } from "hooks/interestRates/types";
 
-enum InterestRatesTableOptions {
+export enum InterestRatesTableOptions {
   Lending = "lending",
   Borrowing = "borrowing",
 }
@@ -59,7 +44,7 @@ type InterestRatesContext = {
   };
   marketDataLoaded: boolean; // whether or not the market data has loaded
 };
-const InterestRatesContext = createContext<InterestRatesContext>({
+export const InterestRatesContext = createContext<InterestRatesContext>({
   selectedTable: InterestRatesTableOptions.Lending,
   tokens: [],
   markets: {
@@ -104,7 +89,7 @@ export default function InterestRatesView() {
         })
       );
 
-      // sort token data according to order in tokenAddresses
+      // sort token data according to market cap
       tokenDataList.sort(
         (a, b) =>
           tokenAddresses.indexOf(a.address) - tokenAddresses.indexOf(b.address)
@@ -115,22 +100,23 @@ export default function InterestRatesView() {
     }
 
     getTokenData();
-  }, [aaveReserves]);
+  }, [aaveReserves, compoundMarkets, setTokenData]);
 
   // token list filtered by search term
   const filteredTokenData = useMemo(
     () =>
       tokenSearchValue === ""
         ? tokenData
-        : tokenData.filter(
-            (token) =>
-              token.name
-                .toLowerCase()
-                .startsWith(tokenSearchValue.toLowerCase()) ||
-              token.symbol
-                .toLowerCase()
-                .startsWith(tokenSearchValue.toLowerCase())
-          ),
+        : tokenData // filter token by search term
+            .filter(
+              (token) =>
+                token.name
+                  .toLowerCase()
+                  .includes(tokenSearchValue.toLowerCase()) ||
+                token.symbol
+                  .toLowerCase()
+                  .includes(tokenSearchValue.toLowerCase())
+            ),
     [tokenSearchValue, tokenData]
   );
 
@@ -154,14 +140,14 @@ export default function InterestRatesView() {
         <Heading size="lg" mb="5">
           Interest Rates
         </Heading>
-        {aaveReserves.length === 0 ? (
+        {tokenData.length === 0 ? (
           <Center w="100%" h="100px">
             <Spinner size="xl" />
           </Center>
         ) : (
           <>
             <Flex w="100%">
-              <Box flex="1">
+              <Box flex="3">
                 <MultiPicker
                   options={{
                     lending: "Lending Rates",
@@ -174,7 +160,7 @@ export default function InterestRatesView() {
                 />
               </Box>
               <Spacer flex="2" />
-              <Box flex="1">
+              <Box flex="3">
                 <TokenSearch onChange={setTokenSearchValue} />
               </Box>
             </Flex>
@@ -197,9 +183,19 @@ export default function InterestRatesView() {
                 </Tr>
               </Thead>
               <Tbody>
-                {filteredTokenData.map(({ address }) => (
-                  <InterestRatesRow assetAddress={address} key={address} />
-                ))}
+                {filteredTokenData.length === 0 && tokenSearchValue !== "" ? (
+                  <Tr>
+                    {/* large colSpan because "100%" was not recognized as valid by TypeScript */}
+                    <Td colSpan={1000}>
+                      No items found that match your search: &ldquo;
+                      {tokenSearchValue}&rdquo;
+                    </Td>
+                  </Tr>
+                ) : (
+                  filteredTokenData.map(({ address }) => (
+                    <InterestRatesRow assetAddress={address} key={address} />
+                  ))
+                )}
               </Tbody>
             </Table>
           </>
@@ -208,201 +204,3 @@ export default function InterestRatesView() {
     </InterestRatesContext.Provider>
   );
 }
-
-// TODO (Zane): change "any" type to something else?
-function MultiPicker({
-  options,
-  onChange,
-}: {
-  options: any;
-  onChange: (state: string) => any;
-}) {
-  // start with first option as default
-  const [selectedKey, setSelectedKey] = useState<string>(
-    Object.keys(options)[0]
-  );
-
-  useEffect(() => {
-    onChange(selectedKey);
-  }, [onChange, selectedKey]);
-
-  return (
-    <ButtonGroup spacing="0" borderRadius="full" bgColor="#2D3748">
-      {Object.keys(options).map((key) => (
-        <MultiPickerButton
-          selected={key === selectedKey}
-          onClick={() => setSelectedKey(key)}
-          key={key}
-        >
-          {options[key]}
-        </MultiPickerButton>
-      ))}
-    </ButtonGroup>
-  );
-}
-
-function MultiPickerButton({
-  children,
-  selected,
-  onClick,
-}: {
-  children: ReactNode;
-  selected: boolean;
-  onClick?: MouseEventHandler<HTMLButtonElement>;
-}) {
-  return (
-    <Button
-      colorScheme="black"
-      variant={selected ? "solid" : "ghost"}
-      borderRadius="full"
-      onClick={onClick}
-      bgColor={selected ? "#00C628" : "transparent"}
-    >
-      {children}
-    </Button>
-  );
-}
-
-function InterestRatesRow({ assetAddress }: { assetAddress: string }) {
-  const { markets, tokens } = useContext(InterestRatesContext);
-
-  // information about this particular token or asset
-  const asset = useMemo(
-    () => tokens?.find((token) => token.address === assetAddress),
-    [tokens]
-  );
-
-  // market data from Aave
-  const aave = useMemo(
-    () => markets.aave.find((reserve) => reserve.tokenAddress === assetAddress),
-    [markets.aave]
-  );
-
-  // market data from Aave
-  const compound = useMemo(
-    () =>
-      markets.compound.find((market) => market.tokenAddress === assetAddress),
-    [markets.compound]
-  );
-
-  return (
-    <Tr initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-      <Td fontWeight="bold">
-        <AssetTitle asset={asset} />
-      </Td>
-      {/* Compound */}
-      <Td textAlign="center">
-        <AnimatedPercentage
-          lendingRate={compound?.rates.lending}
-          borrowingRate={compound?.rates.borrowing}
-        />
-      </Td>
-      {/* Aave */}
-      <Td textAlign="center">
-        <AnimatedPercentage
-          lendingRate={aave?.rates.lending}
-          borrowingRate={aave?.rates.borrowing}
-        />
-      </Td>
-      {/* Fuse P1 */}
-      <Td textAlign="center">
-        <AnimatedPercentage lendingRate={null} borrowingRate={null} />
-      </Td>
-      {/* Fuse P2 */}
-      <Td textAlign="center">
-        <AnimatedPercentage lendingRate={null} borrowingRate={null} />
-      </Td>
-    </Tr>
-  );
-}
-
-function AnimatedPercentage({
-  lendingRate,
-  borrowingRate,
-}: {
-  // undefined = loading, null = not present
-  lendingRate: BigNumber | null | undefined;
-  borrowingRate: BigNumber | null | undefined;
-}) {
-  const { selectedTable, marketDataLoaded } = useContext(InterestRatesContext);
-
-  return !lendingRate || !borrowingRate ? (
-    // show Spinner if values not yet loaded, otherwise show dash
-    <>{marketDataLoaded ? "\u2013" : <Spinner size="xs" />}</>
-  ) : (
-    <motion.div
-      initial={{ opacity: 0, y: -10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 10 }}
-      transition={{ ease: "easeOut", duration: 0.25 }}
-      style={{ position: "relative" }}
-      // had to add key prop for framer-motion to animate
-      key={selectedTable}
-    >
-      {formatPercentageBN(
-        selectedTable === InterestRatesTableOptions.Lending
-          ? lendingRate
-          : borrowingRate
-      )}
-    </motion.div>
-  );
-}
-
-function AssetTitle({ asset }: { asset?: TokenData }) {
-  const [hasLogoLoaded, setHasLogoLoaded] = useState(false);
-
-  return asset ? (
-    // show asset title Name (Symbol)
-    <>
-      <Spinner size="xs" hidden={hasLogoLoaded} />
-      <Box hidden={!hasLogoLoaded}>
-        <Image
-          src={asset?.logoURL}
-          borderRadius="full"
-          boxSize="18px"
-          display="inline-block"
-          mr="6px"
-          // shift icons up 1px (looked awkward otherwise)
-          position="relative"
-          transform="translateY(-1px)"
-          onLoad={() => setHasLogoLoaded(true)}
-        />
-        {asset?.name} ({asset?.symbol})
-      </Box>
-    </>
-  ) : (
-    // no data yet, so show spinner
-    <Spinner size="xs" />
-  );
-}
-
-function TokenSearch({ onChange }: { onChange: (value: string) => void }) {
-  const [val, setVal] = useState("");
-
-  // run onChange on value change
-  useEffect(() => {
-    onChange(val);
-  }, [val, onChange]);
-
-  return (
-    <Box>
-      <InputGroup>
-        <InputLeftElement
-          pointerEvents="none"
-          children={<SearchIcon color="#757575" />}
-        />
-        <Input
-          variant="filled"
-          value={val}
-          onChange={({ target: { value } }) => setVal(value)}
-          placeholder="Search Assets"
-          _placeholder={{ color: "gray.500", fontWeight: "bold" }}
-        />
-      </InputGroup>
-    </Box>
-  );
-}
-
-// format percentage with 2 decimal places
-const formatPercentageBN = (rate: BigNumber) =>
-  rate.times(100).toFixed(2) + "%";
